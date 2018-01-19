@@ -126,6 +126,16 @@ static inline void flush_dcache(void *addr)
     __asm__ __volatile__ ("dsb\n");
 }
 
+static inline void flush_icache(void *addr)
+{
+	unsigned long addr_long;
+
+	addr_long = (unsigned long)addr;
+	asm volatile ("MCR p15, 0, %0, c7, c5, 1\n" :: "r" (addr_long));
+    asm volatile ("isb\n");
+    asm volatile ("dsb\n");
+}
+
 static inline unsigned int get_l2_set_num(void)
 {
 	unsigned int l2_level;

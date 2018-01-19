@@ -1,6 +1,6 @@
 #!/bin/sh
 
-CC=aarch64-linux-gnu-
+CC=/home/local/ASUAD/hcho67/works/optee_rpi3/toolchains/aarch64/bin/aarch64-linux-gnu-
 
 # build lkm
 cd lkm
@@ -9,7 +9,7 @@ cp -f Makefile Makefile.bkg
 cp -f Makefile.def Makefile
 sync
 
-make CROSS_COMPILE=${CC} ARCH=arm64 KDIR=/home/jinb.park/devel/optee/linux
+make CROSS_COMPILE=${CC} ARCH=arm64 KDIR=/home/local/ASUAD/hcho67/works/optee_rpi3/linux
 
 cp -f Makefile.bkg Makefile
 rm -f Makefile.bkg

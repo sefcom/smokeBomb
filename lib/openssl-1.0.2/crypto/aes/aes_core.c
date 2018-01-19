@@ -801,7 +801,12 @@ uint64_t get_monotonic_time(void)
 static inline unsigned long get_current_pc(void)
 {
 	unsigned long pc;
+#ifdef __aarch64__
 	asm volatile("adr %0, .\n" : "=r" (pc));
+#else
+	asm volatile ("mov %0, pc\n" : "=r" (pc));
+	pc -= 8;
+#endif
 	return pc;
 }
 #endif
@@ -908,6 +913,24 @@ void AES_encrypt(const unsigned char *in, unsigned char *out,
     rk += key->rounds << 2;
 #else  /* !FULL_UNROLL */
 
+#ifdef SMOKE_BOMB_ENABLE
+	if (sva && eva && sb_init_flag == 0) {
+		sb_ret = smoke_bomb_init(sva, eva, &sched_policy, &sched_prio);
+		if (sb_ret) {
+			printf("smoke_bomb_init error : %d\n", sb_ret);
+			//exit(-1);
+		} else {
+			sb_init_flag = 1;
+		}
+	}
+	if (sva == 0)
+		sva = get_current_pc();
+
+#ifdef SMOKE_BOMB_PROFILING
+	btime = get_monotonic_time();
+#endif
+#endif
+
 #ifdef ASYNC_ATTACK
 	/* [JB] delay */
 	for (i=0; i<(key->rounds * 5000); i++)
@@ -917,23 +940,6 @@ void AES_encrypt(const unsigned char *in, unsigned char *out,
 	if (first_try == 0) {
 		printf("pre one-round encryption\n");
 	}
-#endif
-
-#ifdef SMOKE_BOMB_ENABLE
-	if (sva && eva && sb_init_flag == 0) {
-		sb_ret = smoke_bomb_init(sva, eva, &sched_policy, &sched_prio);
-		if (sb_ret) {
-			printf("smoke_bomb_init error : %d\n", sb_ret);
-			exit(-1);
-		}
-		sb_init_flag = 1;
-	}
-	if (sva == 0)
-		sva = get_current_pc();
-
-#ifdef SMOKE_BOMB_PROFILING
-	btime = get_monotonic_time();
-#endif
 #endif
 
     /*
@@ -1055,9 +1061,10 @@ void AES_encrypt(const unsigned char *in, unsigned char *out,
 		sb_ret = smoke_bomb_exit(sva, eva, sched_policy, sched_prio);
 		if (sb_ret) {
 			printf("smoke_bomb_exit error : %d\n", sb_ret);
-			exit(-1);
+			//exit(-1);
+		} else {
+			sb_init_flag = 0;
 		}
-		sb_init_flag = 0;
 	}
 #endif
 }

@@ -59,6 +59,14 @@ static inline sb_insn sb_get_rt(sb_insn code)
 {
 	return ((code << 16) >> 28);
 }
+static inline sb_insn sb_get_imm12(sb_insn code)
+{
+	sb_insn sb_code;
+	
+	sb_code = ((code << 20) >> 20);
+	sb_code &= ( ~(SB_INSN_DUMMY_3 << 4) );
+	return sb_code;
+}
 /*
  *******************************************************
  * decoding function for smoke-bomb instruction - end
@@ -109,6 +117,7 @@ static void dispatch_ldr_reg(struct pt_regs *regs, sb_insn sb_code)
 	/* 1. LDR */
 	ptr = (unsigned int *)regs->uregs[rn];
 	idx = (unsigned int)regs->uregs[rm];
+	
 	ptr += idx;
 	regs->uregs[rt] = *ptr; /* perform original LDR instruction */
 
@@ -129,37 +138,56 @@ static void dispatch_ldr_reg(struct pt_regs *regs, sb_insn sb_code)
  */
 static bool is_insn_ldr_imm(insn code)
 {
-	return (code & (0xFFF88000)) == (0xE5900000);	/* (code & mask) == val && imm == 0 */
+	sb_insn imm12;
+	
+	if ( (code & (0xFFF00000)) != (0xE5900000) )
+		return false;
+
+	imm12 = (code << 20) >> 20;
+
+	/* [ToDo] patch only 1024-align */
+	if (imm12 % 1024 != 0)
+		return false;
+		
+	/* patch if bit[4] is 0 */
+	if ((imm12 & (SB_INSN_DUMMY_3 << 4)) == (SB_INSN_DUMMY_3 << 4))
+		return false;
+
+	return true;
 }
 static sb_insn convert_ldr_imm(insn code, insn sb_op)
 {
 	sb_insn sb_code = 0;
-	insn rn = 0, rt = 0;
+	insn rn = 0, rt = 0, imm12 = 0;
 
 	sb_code |= (SB_INSN_DUMMY_1 << 24);
 	sb_code |= (SB_INSN_DUMMY_2 << 20);
-	sb_code |= (SB_INSN_DUMMY_3 << 4);
+	sb_code |= (SB_INSN_DUMMY_3 << 4); /* this bit will be ignored at runtime */
 	sb_code |= (sb_op << 22);
 
 	rn = (code << 12) >> 28;
 	rt = (code << 16) >> 28;
+	imm12 = (code << 20) >> 20;
 
 	sb_code |= (rn << 16);
 	sb_code |= (rt << 12);
+	sb_code |= (imm12);
 
 	return sb_code;
 }
 static void dispatch_ldr_imm(struct pt_regs *regs, sb_insn sb_code)
 {
-	sb_insn rn, rt;
+	sb_insn rn, rt, imm12;
 	unsigned int *ptr;
 
 	rn = sb_get_rn(sb_code);
 	rt = sb_get_rt(sb_code);
+	imm12 = sb_get_imm12(sb_code);
 
 	/* LDR Rt, [Rn] ==> read data from Rn, write data to Rt. */
 	/* 1. LDR */
 	ptr = (unsigned int *)regs->uregs[rn];
+	ptr = (unsigned int *)((char *)ptr + imm12);
 	regs->uregs[rt] = *ptr; /* perform original LDR instruction */
 
 	/* 2. Flush */
@@ -208,6 +236,7 @@ struct sb_insn_handler* handlers[] = {
  * [4] - SB_INSN_DUMMY_3
  * [3:0] - Rm
  *
+ * [11:0] can be imm12 for ldr_imm
  */
 sb_insn convert_insn_to_sb_insn(insn code)
 {

@@ -3,6 +3,7 @@ obj-m := cache.o
 cache-y += cache_test.o
 cache-y += lru_test.o
 cache-y += line_fill_test.o
+cache-y += icache_test.o
 
 KDIR   := /usr/include/kernel_header/debug
 -include $(KDIR)/off_tree_module_build.mk

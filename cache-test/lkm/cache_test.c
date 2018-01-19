@@ -45,6 +45,9 @@ void lru_test_init(void);
 void lru_test_exit(void);
 void line_fill_test_init(void);
 void line_fill_test_exit(void);
+void icache_test_init(void);
+void icache_test_exit(void);
+
 
 struct test_vector tests[] = {
 	{
@@ -56,6 +59,11 @@ struct test_vector tests[] = {
 		.cmd = "line_fill",
 		.init = line_fill_test_init,
 		.exit = line_fill_test_exit,
+	},
+	{
+		.cmd = "icache_test",
+		.init = icache_test_init,
+		.exit = icache_test_exit,
 	},
 };
 
