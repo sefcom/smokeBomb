@@ -2,6 +2,18 @@
 #include <libflush.h>
 #include "common.h"
 
+#ifdef __aarch64__
+#define _SMOKE_BOMB_ARMV8
+#else
+#define _SMOKE_BOMB_ARMV7
+#endif
+
+#include "../../smoke-bomb/header.h"
+#include <sb_api.h>
+
+unsigned long test_count = 0;
+unsigned long cycle_sum = 0;
+
 const int secret = 3;
 const int arr[10] = {0,1,2,3,4,5,6,7,8,9,};
 const int secret2 = 2;
@@ -57,19 +69,59 @@ void victim_func(int idx)
 		printf("val 999\n");
 }
 
+#include <time.h>
+#include <stdint.h>
+static inline uint64_t get_ms_time(void)
+{
+    struct timespec t1;
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    return (t1.tv_sec * 1000) + (t1.tv_nsec / 1000000);
+}
+
+void sb_get_time(uint64_t *time, unsigned int *count);
+
+void __attribute__((optimize ("-O0"))) victim_ms(int test_count)
+{
+	int i;
+	uint64_t bc, ac;
+	uint64_t time;
+	unsigned int count;
+
+	//bc = get_ms_time();
+	for (i=0; i<test_count; i++)
+		victim_func(0);
+	//ac = get_ms_time();
+
+	sb_get_time(&time, &count);
+	printf("test count : %d, time : %lld ns\n", count, time / count);
+}
+
 int main(int argc, char **argv)
 {
 	int input_idx;
 	unsigned int val;
+	unsigned long bc, ac;
 	
 	char reply_msg[] = "reply!!";
 	struct shm_msg *client_msg;
 	struct shm_msg *server_msg;
 	void *addr;
 	int fd;
+	int option, test_count;
+
+	if (argc > 1) {
+		option = atoi(argv[1]);
+
+		if (option == 2) {
+			test_count = atoi(argv[2]);
+			victim_ms(test_count);
+			return 0;
+		}
+	}
 
 	init_libflush();
 	bind_cpu(2);
+	smoke_bomb_init_pmu();
 
 	/* create shm */
 	if((fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, PERM_FILE)) == -1) {
@@ -112,7 +164,12 @@ int main(int argc, char **argv)
 		}
 
 		/* test!! */
+		bc = get_cycle_count();
 		victim_func(input_idx);
+		ac = get_cycle_count();
+
+		cycle_sum += (ac - bc);
+		test_count++;
 
 		/* prepare msg */
 		server_msg->status = 0;
@@ -122,6 +179,8 @@ int main(int argc, char **argv)
 		memcpy(server_msg->msg, &val, sizeof(val));
 		server_msg->status = 1;
 	}
+
+	printf("performance : %ld cycles\n", cycle_sum / test_count);
 
 out:
 	/* destroy shm */

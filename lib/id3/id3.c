@@ -16,8 +16,21 @@
 	#define	DEBUG(...) do{}while(0);
 #endif
 
+#include <time.h>
+#include <stdint.h>
+/* get nanosecond time. 10^-9 */
+uint64_t get_monotonic_time(void)
+{
+    struct timespec t1;
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    return t1.tv_sec * 1000*1000*1000ULL + t1.tv_nsec;
+}
+
+uint64_t sb_time_sum = 0;
+unsigned int sb_test_count = 0;
+
 /* precreated tree by create_prestored_tree() function */
-const pre_node_t dec_tree[32] __attribute__((aligned (64))) = {
+const pre_node_t dec_tree[32] __attribute__((aligned (4096))) = {
 	[31] = {
 	.winvalue = 31,
 	.tot_nodes = 3,
@@ -84,7 +97,6 @@ const pre_node_t dec_tree[32] __attribute__((aligned (64))) = {
 	.nodes = {},
 	},
 };
-
 const struct pre_dsinfo_t dec_tree_infolist[] = {
     {
         .name = "SUNNY",
@@ -136,6 +148,12 @@ const struct pre_dsinfo_t dec_tree_infolist[] = {
     },
 };
 
+void sb_get_time(uint64_t *time, unsigned int *count)
+{
+	*time = sb_time_sum;
+	*count = sb_test_count;
+}
+
 /*
 	Prima scansione dell'albero di decisione per raccoglioere
 	info riguardo alla profondita' massima dei rami e al numero
@@ -172,16 +190,15 @@ char *testset[] =
 	"RAIN",		"MILD",   	"HIGH",   	"WEAK",		"YES",
 };
 
-long *convert_str_data_to_long( char **data, long cols, long rows )
+long *convert_str_data_to_int( char **data, int cols, int rows )
 {
-	long *dataset = NULL;
-	unsigned long dataset_sz = 0;
+	int *dataset = NULL;
+	unsigned int dataset_sz = 0;
 	char label_found	= 0;
-	long string_id		= 0;
-	long assign_id		= 0;
+	int assign_id		= 0;
 	int i, j, col, arr_size;
 
-	dataset_sz = sizeof( long ) * cols * rows;
+	dataset_sz = sizeof( unsigned int ) * cols * rows;
 
 	// Allocazione memoria per la conversione stringa->value
 	if( ( dataset = malloc( dataset_sz ) ) == NULL )
@@ -305,53 +322,124 @@ void create_prestored_tree( node_t *node, struct dsinfo_t *infolist )
 	printf("};\n");
 }
 
-static long _traverse_prestored_tree(pre_node_t *root, long idx, long *dataset)
+#ifdef SMOKE_BOMB_ENABLE
+#include <sb_api.h>
+#include <stdint.h>
+
+#ifdef __aarch64__
+#define get_current_pc(va) do { \
+	asm volatile("adr %0, .\n" : "=r" (va)); \
+}while(0)
+#else
+#define get_current_pc(va) do { \
+	asm volatile ("mov %0, pc\n" : "=r" (va)); \
+	va -= 8; \
+}while(0)
+#endif
+
+unsigned long sva = 0, eva = 0;
+int sb_init_flag = 0;
+#endif
+
+static int _traverse_prestored_tree(pre_node_t *root, int idx, int *dataset)
 {
-	long i, cidx;
+	int i, cidx;
 	int flag = 0;
+	int winvalue = -1, tidx = idx;
+	uint64_t bc, ac;
+	
+#ifdef SMOKE_BOMB_ENABLE
+	int sb_ret = 0;
+    int sched_policy = -1, sched_prio = -1;
+    uint64_t btime, atime;
 
-	if(root[idx].tot_nodes == 0)
-		return root[idx].winvalue;
+    if (sva && eva && sb_init_flag == 0) {
+        sb_ret = smoke_bomb_init(sva, eva, dec_tree, sizeof(pre_node_t) * 12, &sched_policy, &sched_prio);
+        if (sb_ret) {
+            printf("smoke_bomb_init error : %d\n", sb_ret);
+            //exit(-1);
+        } else {
+            sb_init_flag = 1;
+        }
+    }
 
-	for(i=0; i<root[idx].tot_nodes; i++)
-	{
-		cidx = root[idx].nodes[i];
-		if(*dataset == cidx) {
-			flag = 1;
-			return _traverse_prestored_tree(root, cidx, (dataset + 1));
+    asm volatile("nop"); asm volatile("nop");
+    if (sva == 0) {
+	    get_current_pc(sva);
+	}
+#endif
+	
+	bc = get_monotonic_time();
+	do {
+		flag = 0;
+		
+		if (root[tidx].tot_nodes == 0) {
+			winvalue = root[tidx].winvalue;
+			break;
 		}
+
+		for (i=0; i<root[tidx].tot_nodes; i++) {
+			cidx = root[tidx].nodes[i];
+			if(*dataset == cidx) {
+				flag = 1;
+				dataset += 1;
+				tidx = cidx;
+				break;
+			}
+		}
+
+		if (flag == 0) {
+			dataset += 1;
+		}
+	} while(1);
+	ac = get_monotonic_time();
+
+	sb_time_sum += (ac - bc);
+	sb_test_count++;
+
+#ifdef SMOKE_BOMB_ENABLE
+	asm volatile("nop"); asm volatile("nop");
+	if (eva == 0) {
+	    get_current_pc(eva);
 	}
 
-	/* If *dataset is not exist, just skip current dataset */
-	if(flag == 0)
-	{
-		return _traverse_prestored_tree(root, idx, (dataset + 1));
-	}
+    if (sva && eva && sb_init_flag == 1) {
+        sb_ret = smoke_bomb_exit(sva, eva, dec_tree, sizeof(pre_node_t) * 12, sched_policy, sched_prio);
+        if (sb_ret) {
+            printf("smoke_bomb_exit error : %d\n", sb_ret);
+            //exit(-1);
+        } else {
+            sb_init_flag = 0;
+        }
+    }
+#endif
 
-	/* do not reach here */
-	return -1;
+	return winvalue;
 }
 
-static long _test_prestored_tree( pre_node_t *node, char **data)
+static int _test_prestored_tree( pre_node_t *node, char **data)
 {
-	long *dataset = NULL;
-	long class;
+	int *dataset = NULL;
+	int class;
+	unsigned int dataset_sz = 0, i;
 
-	dataset = convert_str_data_to_long(data, 5, 1);
+	dataset = convert_str_data_to_int(data, 5, 1);
 	if(!dataset)
 		return -1;
 
 	/* traverse prestored tree */
 	class = _traverse_prestored_tree(dec_tree, 31, dataset);
+	
+	free(dataset);
 	return class;
 }
 
-long test_prestored_tree ( void )
+int test_prestored_tree ( void )
 {
 	return _test_prestored_tree(dec_tree, testset);
 }
 
-long test_prestored_tree_with_data(char **data)
+int test_prestored_tree_with_data(char **data)
 {
 	return _test_prestored_tree(dec_tree, data);
 }

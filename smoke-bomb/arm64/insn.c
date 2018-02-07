@@ -10,11 +10,14 @@
 
 #include "insn.h"
 #include "cache.h"
+#include "../header.h"
 
 #define SB_INSN_DUMMY_1 0x1 /* [31:26] ==> (SB_INSN_DUMMY_1 << 26) */
 #define SB_INSN_DUMMY_2 0x7	/* [23:21] ==> (SB_INSN_DUMMY_2 << 21) */
 #define SB_INSN_OP_LDR32_REG 0x0	/* [25:24] ==> (SB_INSN_OP_LDR32_REG << 24) */
 #define SB_INSN_OP_LDR32_IMM 0x1
+#define SB_INSN_OP_STR32_REG 0x2	/* [25:24] ==> (SB_INSN_OP_STR32_REG << 24) */
+#define SB_INSN_OP_STR32_IMM 0x3
 
 typedef bool (*sb_insn_checker)(insn);
 typedef sb_insn (*sb_insn_converter)(insn, insn);
@@ -64,6 +67,10 @@ static inline sb_insn sb_get_s(sb_insn code)
 {
 	return ((code << 19) >> 31);
 }
+static inline sb_insn sb_get_imm(sb_insn code)
+{
+	return ((code << 11) >> 21);
+}
 /*
  *******************************************************
  * decoding function for smoke-bomb instruction - end
@@ -110,22 +117,77 @@ static sb_insn convert_ldr32_reg(insn code, insn sb_op)
 static void dispatch_ldr32_reg(struct pt_regs *regs, sb_insn sb_code)
 {
 	sb_insn rm, rn, rt;
-	unsigned int *ptr;
-	unsigned int idx;
+	unsigned int *ptr, *ptr_z;
+	unsigned int idx, set1, set2;
+	unsigned long va_z;
+	phys_addr pa;
+	long pid;
 
 	rm = sb_get_rm(sb_code);
 	rn = sb_get_rn(sb_code);
 	rt = sb_get_rt(sb_code);
+
+	pid = get_pid_idx(current->pid);
+
+	/*
+	 * X (ptr)   :  memory address decoded from LDR
+	 * Z (ptr_z) :  pre-loaded data of which set is the same as X
+	 */
 	
-	/* 1. read addr from Rn */
+	/* 1. Load/Store X */
 	ptr = (unsigned int *)regs->regs[rn];
 	idx = (unsigned int)regs->regs[rm];
-	
 	ptr += idx;
 	regs->regs[rt] = *ptr; /* perform original LDR instruction */
 
-	/* 2. Flush */
-	flush_dcache(ptr);
+	/* 2. Check X */
+	if (sdata_region[pid].sva <= (unsigned long)ptr && sdata_region[pid].eva > (unsigned long)ptr) {
+		/* 3. Do nothing */
+		;
+	}
+	else {
+		/* 4. Get the set number of X */
+		sb_convert_va_to_pa((unsigned long)ptr, &pa);
+		set2 = get_l2_set_idx_from_addr((void *)pa);
+		va_z = sdata_l2_arr[pid][set2].va;
+
+		/* not related set index!! */
+		if (sdata_l2_arr[pid][set2].va == 0)
+			return;
+		asm volatile ("ISB");
+		asm volatile ("DMB ISH");
+
+		/* 5. LDR + Flush L2 */
+		set1 = get_l1_set_idx_from_addr((void *)pa);
+		
+		flush_l1_dcache(set1, l1_ways - 1); 
+		flush_l2_dcache(set2, l2_ways - 1);
+		pld_data((void *)va_z);
+		flush_l2_dcache(set2, l2_ways - 1);
+		/*
+			unsigned int i=0, set_sva;
+			sb_convert_va_to_pa((unsigned long)sdata_region.sva, &pa);
+			set_sva = get_l1_set_idx_from_addr((void *)pa);
+			
+			if(set_sva == set1){
+				va_z = sdata_region.sva;
+			}
+			else if(set_sva < set1) {
+				va_z = sdata_region.sva + (CACHE_LINE_SIZE * (set1 - set_sva));
+			}
+			else {
+				va_z = sdata_region.sva + (CACHE_LINE_SIZE * (64 + (set_sva - set1)));
+			}
+
+			for( ; va_z < sdata_region.eva; va_z += CACHE_LINE_SIZE){
+				flush_l1_dcache(set1, i++); 
+				flush_l2_dcache(set2, l2_ways - 1);
+				pld_data((void *)va_z);
+			}
+
+			flush_l2_dcache(set2, l2_ways - 1);
+		*/
+	}
 }
 /*
  *****************************************
@@ -140,13 +202,13 @@ static void dispatch_ldr32_reg(struct pt_regs *regs, sb_insn sb_code)
  */
 static bool is_insn_ldr32_imm(insn code)
 {
-	/* support (imm == 0) only */
-	return ((code & (0xFFFFFC00)) == (0xB9400000));
+	return ((code & (0xFFF00000)) == (0xB9400000));
+	// return ((code & (0xFFE00C00)) == (0xB8400400));
 }
 static sb_insn convert_ldr32_imm(insn code, insn sb_op)
 {
 	sb_insn sb_code = 0;
-	insn rn = 0, rt = 0;
+	insn rn = 0, rt = 0, imm = 0;
 
 	/* 1. set dummy to sb_code */
 	sb_code |= (SB_INSN_DUMMY_1 << 26);
@@ -156,8 +218,10 @@ static sb_insn convert_ldr32_imm(insn code, insn sb_op)
 	/* 2. get info from code */
 	rn = (code << 22) >> 27;
 	rt = (code << 27) >> 27;
+	imm = (code << 11) >> 21;
 	
 	/* 3. set info to sb_code */
+	sb_code |= (imm << 10);
 	sb_code |= (rn << 5);
 	sb_code |= (rt);
 
@@ -165,36 +229,267 @@ static sb_insn convert_ldr32_imm(insn code, insn sb_op)
 }
 static void dispatch_ldr32_imm(struct pt_regs *regs, sb_insn sb_code)
 {
-	sb_insn rn, rt;
-	unsigned int *ptr;
+	sb_insn rn, rt, imm;
+	unsigned int *ptr, *ptr_z;
+	unsigned int idx, set1, set2;
+	unsigned long va_z;
+	phys_addr pa;
+	long pid;
 
 	rn = sb_get_rn(sb_code);
 	rt = sb_get_rt(sb_code);
-	
-	/* 1. read addr from Rn */
-	ptr = (unsigned int *)regs->regs[rn];
-	regs->regs[rt] = *ptr; /* perform original LDR instruction */
+	imm = sb_get_imm(sb_code);
 
-	/* 2. Flush */
-	flush_dcache(ptr);
+	pid = get_pid_idx(current->pid);
+	
+	/*
+	 * X (ptr)   :  memory address decoded from LDR
+	 * Z (ptr_z) :  pre-loaded data of which set is the same as X
+	 */
+	
+	/* 1. Load/Store X */
+	ptr = (unsigned int *)regs->regs[rn];
+	ptr += imm;
+	regs->regs[rt] = *ptr; /* perform original LDR instruction */
+ 
+	/* 2. Check X */
+	if (sdata_region[pid].sva <= (unsigned long)ptr && sdata_region[pid].eva > (unsigned long)ptr) {
+		/* 3. Do nothing */
+		;
+	}
+	else {
+		/* 4. Get the set number of X */
+		sb_convert_va_to_pa((unsigned long)ptr, &pa);
+		set2 = get_l2_set_idx_from_addr((void *)pa);
+		va_z = sdata_l2_arr[pid][set2].va;
+
+		/* not related set index!! */
+		if (sdata_l2_arr[pid][set2].va == 0)
+			return;
+		asm volatile ("ISB");
+		asm volatile ("DMB ISH");
+
+		/* 5. LDR + Flush L2 */
+		set1 = get_l1_set_idx_from_addr((void *)pa);
+		
+		flush_l1_dcache(set1, l1_ways - 1);
+		flush_l2_dcache(set2, l2_ways - 1);
+		pld_data((void *)va_z);
+		flush_l2_dcache(set2, l2_ways - 1);
+	} 
 }
 /*
  *****************************************
  * INSN_HANDLER for LDR32-imm - end
  ******************************************
  */
+/*
+ *****************************************
+ * INSN_HANDLER for STR32-register - start
+ ******************************************
+ */
+static bool is_insn_str32_reg(insn code)
+{
+	/* (code & mask) == val */
+	return ((code & (0xFFE00C00)) == (0xB8200800));
+}
+static sb_insn convert_str32_reg(insn code, insn sb_op)
+{
+	sb_insn sb_code = 0;
+	insn rm = 0, option = 0, S = 0, rn = 0, rt = 0;
 
+	/* 1. set dummy to sb_code */
+	sb_code |= (SB_INSN_DUMMY_1 << 26);
+	sb_code |= (SB_INSN_DUMMY_2 << 21);
+	sb_code |= (sb_op << 24);
+
+	/* 2. get info from code */
+	rm = (code << 11) >> 27;
+	rn = (code << 22) >> 27;
+	rt = (code << 27) >> 27;
+	option = (code << 16) >> 29;
+	S = (code << 19) >> 31;
+	
+	/* 3. set info to sb_code */
+	sb_code |= (rm << 16);
+	sb_code |= (rn << 5);
+	sb_code |= (rt);
+	sb_code |= (option << 13);
+	sb_code |= (S << 12);
+
+	return sb_code;
+}
+static void dispatch_str32_reg(struct pt_regs *regs, sb_insn sb_code)
+{
+	sb_insn rm, rn, rt;
+	unsigned int *ptr, *ptr_z;
+	unsigned int idx, set1, set2;
+	unsigned long va_z;
+	phys_addr pa;
+	long pid;
+
+	rm = sb_get_rm(sb_code);
+	rn = sb_get_rn(sb_code);
+	rt = sb_get_rt(sb_code);
+
+	pid = get_pid_idx(current->pid);
+
+	/*
+	 * X (ptr)   :  memory address decoded from STR
+	 * Z (ptr_z) :  pre-loaded data of which set is the same as X
+	 */
+	
+	/* 1. Load/Store X */
+	ptr = (unsigned int *)regs->regs[rn];
+	idx = (unsigned int)regs->regs[rm];
+	ptr += idx;
+	// regs->regs[rt] = *ptr; /* perform original LDR instruction */
+	*ptr = regs->regs[rt]; /* perform original STR instruction */
+
+	/* 2. Check X */
+	if (sdata_region[pid].sva <= (unsigned long)ptr && sdata_region[pid].eva > (unsigned long)ptr) {
+		/* 3. Do nothing */
+		;
+	}
+	else {
+		/* 4. Get the set number of X */
+		sb_convert_va_to_pa((unsigned long)ptr, &pa);
+		set2 = get_l2_set_idx_from_addr((void *)pa);
+		va_z = sdata_l2_arr[pid][set2].va;
+
+		/* not related set index!! */
+		if (sdata_l2_arr[pid][set2].va == 0)
+			return;
+		asm volatile ("ISB");
+		asm volatile ("DMB ISH");
+
+		/* 5. LDR + Flush L2 */
+		set1 = get_l1_set_idx_from_addr((void *)pa);
+		
+		flush_l1_dcache(set1, l1_ways - 1);
+		flush_l2_dcache(set2, l2_ways - 1);
+		pld_data((void *)va_z);
+		flush_l2_dcache(set2, l2_ways - 1);
+	}
+}
+/*
+ *****************************************
+ * INSN_HANDLER for STR32-register - end
+ ******************************************
+ */
+
+/*
+ *****************************************
+ * INSN_HANDLER for STR32-imm - start
+ ******************************************
+ */
+static bool is_insn_str32_imm(insn code)
+{
+	insn rn = 0, rt = 0;
+	
+	if ((code & (0xFFF00000)) != (0xB9000000))
+		return false;
+
+	rn = (code << 22) >> 27;
+	rt = (code << 27) >> 27;
+	if (rn >= 10 || rt >= 10)
+		return false;
+	
+	return true;
+}
+static sb_insn convert_str32_imm(insn code, insn sb_op)
+{
+	sb_insn sb_code = 0;
+	insn rn = 0, rt = 0, imm = 0;
+
+	/* 1. set dummy to sb_code */
+	sb_code |= (SB_INSN_DUMMY_1 << 26);
+	sb_code |= (SB_INSN_DUMMY_2 << 21);
+	sb_code |= (sb_op << 24);
+
+	/* 2. get info from code */
+	rn = (code << 22) >> 27;
+	rt = (code << 27) >> 27;
+	imm = (code << 11) >> 21;
+	
+	/* 3. set info to sb_code */
+	sb_code |= (imm << 10);
+	sb_code |= (rn << 5);
+	sb_code |= (rt);
+
+	return sb_code;
+}
+static void dispatch_str32_imm(struct pt_regs *regs, sb_insn sb_code)
+{
+	sb_insn rn, rt, imm;
+	unsigned int *ptr, *ptr_z;
+	unsigned int idx, set1, set2;
+	unsigned long va_z;
+	phys_addr pa;
+	long pid;
+
+	rn = sb_get_rn(sb_code);
+	rt = sb_get_rt(sb_code);
+	imm = sb_get_imm(sb_code);
+
+	pid = get_pid_idx(current->pid);
+	
+	/*
+	 * X (ptr)   :  memory address decoded from STR
+	 * Z (ptr_z) :  pre-loaded data of which set is the same as X
+	 */
+	
+	/* 1. Load/Store X */
+	ptr = (unsigned int *)regs->regs[rn];
+	ptr += imm;
+	// regs->regs[rt] = *ptr; /* perform original LDR instruction */
+	*ptr = regs->regs[rt]; /* perform original STR instruction */
+ 
+	/* 2. Check X */
+	if (sdata_region[pid].sva <= (unsigned long)ptr && sdata_region[pid].eva > (unsigned long)ptr) {
+		/* 3. Do nothing */
+		;
+	}
+	else {
+		/* 4. Get the set number of X */
+		sb_convert_va_to_pa((unsigned long)ptr, &pa);
+		set2 = get_l2_set_idx_from_addr((void *)pa);
+		va_z = sdata_l2_arr[pid][set2].va;
+
+		/* not related set index!! */
+		if (sdata_l2_arr[pid][set2].va == 0)
+			return;
+		asm volatile ("ISB");
+		asm volatile ("DMB ISH");
+
+		/* 5. LDR + Flush L2 */
+		set1 = get_l1_set_idx_from_addr((void *)pa);
+		
+		flush_l1_dcache(set1, l1_ways - 1);
+		flush_l2_dcache(set2, l2_ways - 1);
+		pld_data((void *)va_z);
+		flush_l2_dcache(set2, l2_ways - 1);
+	} 
+}
+/*
+ *****************************************
+ * INSN_HANDLER for STR32-imm - end
+ ******************************************
+ */
 
 /*
  * [ handlers ]
  */
 DEFINE_SB_INSN_HANDLER(SB_INSN_OP_LDR32_REG, ldr32_reg);
 DEFINE_SB_INSN_HANDLER(SB_INSN_OP_LDR32_IMM, ldr32_imm);
-
+//DEFINE_SB_INSN_HANDLER(SB_INSN_OP_STR32_REG, str32_reg);
+//DEFINE_SB_INSN_HANDLER(SB_INSN_OP_STR32_IMM, str32_imm);
 
 struct sb_insn_handler* handlers[] = {
 	&handler_ldr32_reg,
 	&handler_ldr32_imm,
+	//&handler_str32_reg,
+	//&handler_str32_imm,
 };
 
 /*
@@ -213,6 +508,7 @@ struct sb_insn_handler* handlers[] = {
  * [9:5] - Rn
  * [4:0] - Rt
  *
+ * [20:10] ==> It can be imm.
  * e.g) ldr Wt, [Rn] ==> read data from Rn, write data to Wt. (W means word, 32bit register)
  */
 sb_insn convert_insn_to_sb_insn(insn code)
@@ -235,6 +531,8 @@ int smoke_bomb_ex_handler(struct pt_regs *regs, unsigned int instr)
 	sb_insn sb_op;
 
 	sb_op = sb_get_sb_op(instr);
+
+	sb_preload();
 	handlers[sb_op]->dispatcher(regs, instr);
 	
 	/* advance pc, and keep going!! */

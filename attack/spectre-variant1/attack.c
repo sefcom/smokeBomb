@@ -1,7 +1,7 @@
 /**
  *	sync one round attack
  *
- *	Copyright (C) 2017  Jinbum Park <jinb.park@samsung.com> Haehyun Cho <haehyun@asu.edu>
+ *	Copyright (C) 2017  Jinbum Park <jinb.park@samsung.com>
 */
 
 #include "common.h"
@@ -188,6 +188,59 @@ void do_test_victim(int idx)
 	}
 }
 
+void print_result_to_csv(void)
+{
+	FILE *fp = NULL;
+	char str[128] = {0,};
+	unsigned i;
+
+	fp = fopen("./result.csv", "w");
+	if (!fp) {
+		printf("fopen error\n");
+		return;
+	}
+
+	snprintf(str, 128, "test count,%d\n", test_count);
+	fwrite(str, 1, strlen(str), fp);
+	
+	fwrite("cache result\n", 1, strlen("cache result\n"), fp); 
+	for (i=0; i<10; i++) {
+		if (i == 9)
+			snprintf(str, 128, "0x%lx\n", (unsigned long)(probe_arr + i));
+		else
+			snprintf(str, 128, "0x%lx,", (unsigned long)(probe_arr + i));
+		fwrite(str, 1, strlen(str), fp);
+	}
+	for (i=0; i<10; i++) {
+		if (i == 9)
+			snprintf(str, 128, "%d\n", score[i]);
+		else
+			snprintf(str, 128, "%d,", score[i]);
+		fwrite(str, 1, strlen(str), fp);
+	}
+
+	fwrite("\nreal secret\n", 1, strlen("\nreal secret\n"), fp);
+	for (i=0; i<10; i++) {
+		if (i == 9)
+			snprintf(str, 128, "0x%lx\n", (unsigned long)(probe_arr + i));
+		else
+			snprintf(str, 128, "0x%lx,", (unsigned long)(probe_arr + i));
+		fwrite(str, 1, strlen(str), fp);
+	}
+	for (i=0; i<10; i++) {
+		if (i == 9)
+			snprintf(str, 128, "%d\n", 0);
+		else {
+			if (i == 3)
+				snprintf(str, 128, "%d,", 1);
+			else
+				snprintf(str, 128, "%d,", 0);
+		}
+		fwrite(str, 1, strlen(str), fp);
+	}
+
+	fclose(fp);
+}
 
 void do_attack(void)
 {
@@ -215,7 +268,8 @@ void do_attack(void)
 				score[idx] += 1;
 		}
 
-		printf("progress : %d / %d\n", t, test_count);
+		if (t % 20 == 0)
+			printf("progress : %d / %d\n", t, test_count);
 	}
 }
 
@@ -227,6 +281,8 @@ void print_result(void)
 	for(i=0; i<10; i++) {
 		printf("[%d] - %d\n", i, score[i]);
 	}
+	
+	print_result_to_csv();
 }
 
 void init_libflush(void)

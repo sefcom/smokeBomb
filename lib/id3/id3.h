@@ -1,6 +1,7 @@
 #ifndef ID3_H_INCLUDED
 #define ID3_H_INCLUDED
 
+#include <stdint.h>
 
 /*
     Struttura dati info dataset
@@ -30,22 +31,22 @@ typedef struct node_tag
 
 typedef struct pre_node_tag
 {
-	long				winvalue;
-	long				tot_nodes;
-	long				nodes[6];
-#if defined(__arm__) && !defined(__aarch64__) 
-	char				dummy[32];					
-#endif
+	int				winvalue;
+	int				tot_nodes;
+	int				nodes[6]; 
+	char			dummy[32];
 } pre_node_t __attribute__((aligned (64)));
 
 struct pre_dsinfo_t
 {
 	char name[64];
-	long value;
+	int value;
 };
 
 /* test to classify one record */
-long test_prestored_tree ( void );
-long test_prestored_tree_with_data(char **data);
+int test_prestored_tree ( void );
+int test_prestored_tree_with_data(char **data);
+
+void sb_get_time(uint64_t *time, unsigned int *count);
 
 #endif // ID3_H_INCLUDED

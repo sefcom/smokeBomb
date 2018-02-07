@@ -141,6 +141,9 @@ int AES_unwrap_key(AES_KEY *key, const unsigned char *iv,
                    unsigned char *out,
                    const unsigned char *in, unsigned int inlen);
 
+#include <stdint.h>
+void sb_get_time(uint64_t *time, unsigned int *count);
+
 
 #ifdef  __cplusplus
 }

@@ -1,6 +1,7 @@
 obj-m := smoke_bomb.o
 
 smoke_bomb-y += sb_lkm.o
+smoke_bomb-y += addr.o
 smoke_bomb-y += ../arm/patch.o
 smoke_bomb-y += ../arm/insn.o
 

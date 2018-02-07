@@ -17,7 +17,7 @@ else ifeq ($(CHIP_NAME), HAWKP)
 ccflags-y += -mcpu=cortex-a15
 endif
 
-ccflags-y += -O0
+#ccflags-y += -O0
 
 default:
 	make -C $(KDIR) M=$(PWD) modules

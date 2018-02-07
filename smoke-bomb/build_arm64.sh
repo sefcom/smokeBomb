@@ -1,6 +1,6 @@
 #!/bin/sh
 
-CC=/home/local/ASUAD/hcho67/works/optee_rpi3/toolchains/aarch64/bin/aarch64-linux-gnu-
+CC=aarch64-linux-gnu-
 
 # build lkm
 cd lkm
@@ -23,7 +23,7 @@ cd ../
 
 # build sb_test
 cd test
-${CC}gcc -g -O0 -D_SMOKE_BOMB_ARMV8 -L./../lib/ -o sb_test sb_test.c -lsb_api
+${CC}gcc -g -O0 -D_SMOKE_BOMB_ARMV8 -I./../../lib/libflush/libflush -L./../../lib/libflush/build/armv8/release -L./../lib/ -o sb_test sb_test.c -lsb_api -lflush
 cd ../
 
 # make build dir

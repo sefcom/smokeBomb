@@ -1,6 +1,7 @@
 obj-m := smoke_bomb.o
 
 smoke_bomb-y += sb_lkm.o
+smoke_bomb-y += addr.o
 
 ccflags-y += -D_SMOKE_BOMB_LKM
 #ccflags-y += -D_SMOKE_BOMB_DEBUG

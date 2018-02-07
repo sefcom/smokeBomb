@@ -1,11 +1,22 @@
 /*
  *	sync one round attack
  *
- *	Copyright (C) 2017  Jinbum Park <jinb.park@samsung.com> Haehyun Cho <haehyun@asu.edu>
+ *	Copyright (C) 2017  Jinbum Park <jinb.park@samsung.com>
 */
 
 #include "common.h"
 #include <id3.h>
+
+#ifdef __aarch64__
+#define _SMOKE_BOMB_ARMV8
+#else
+#define _SMOKE_BOMB_ARMV7
+#endif
+
+#include "../../smoke-bomb/header.h"
+
+unsigned long test_count = 0;
+unsigned long cycle_sum = 0;
 
 char *testset1[] = 
 {
@@ -15,6 +26,46 @@ char *testset1[] =
 	"SUNNY", 	"MILD",  	"HIGH",    	"WEAK",		"NO",
 };
 
+void bind_cpu(int cpuid)
+{
+    unsigned long mask = 0;
+
+    if(cpuid == 0) mask = 1;
+    else if(cpuid == 1) mask = 2;
+    else if(cpuid == 2) mask = 4;
+    else if(cpuid == 3) mask = 8;
+
+    if(sched_setaffinity(0, sizeof(mask), (cpu_set_t*)&mask) < 0)
+    {
+        printf("sched_setaffinity error\n");
+        return;
+    }
+}
+
+#include <time.h>
+#include <stdint.h>
+static inline uint64_t get_ms_time(void)
+{
+    struct timespec t1;
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    return (t1.tv_sec * 1000) + (t1.tv_nsec / 1000000);
+}
+
+void __attribute__((optimize ("-O0"))) test_ms(int test_count)
+{
+	int i;
+	uint64_t time;
+	unsigned int count;
+
+	//bc = get_ms_time();
+	for (i=0; i<test_count; i++) {
+		test_prestored_tree_with_data(testset1);
+	}
+	//ac = get_ms_time();
+
+	sb_get_time(&time, &count);
+	printf("test count : %d, time : %lld ns\n", count, time / count);
+}
 
 int main(int argc, char **argv)
 {
@@ -24,6 +75,21 @@ int main(int argc, char **argv)
 	struct shm_msg *server_msg;
 	void *addr;
 	int fd;
+	unsigned long ac, bc;
+	int option, test_count;
+
+	if (argc > 1) {
+		option = atoi(argv[1]);
+
+		if (option == 2) {
+			test_count = atoi(argv[2]);
+			test_ms(test_count);
+			return 0;
+		}
+	}
+
+	bind_cpu(2);
+	smoke_bomb_init_pmu();
 
 	/* create shm */
 	if((fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, PERM_FILE)) == -1) {
@@ -65,7 +131,12 @@ int main(int argc, char **argv)
 		}
 
 		/* test decision tree!! */
+		bc = get_cycle_count();
 		test_prestored_tree_with_data(testset1);
+		ac = get_cycle_count();
+		
+		cycle_sum += (ac - bc);
+		test_count++;
 
 		/* prepare msg */
 		server_msg->status = 0;
@@ -75,6 +146,8 @@ int main(int argc, char **argv)
 		memcpy(server_msg->msg, reply_msg, sizeof(reply_msg));
 		server_msg->status = 1;
 	}
+
+	printf("performance : %ld cycles\n", cycle_sum / test_count);
 
 out:
 	/* destroy shm */

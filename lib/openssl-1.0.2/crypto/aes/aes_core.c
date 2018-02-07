@@ -54,7 +54,7 @@ Td3[x] = Si[x].[09, 0d, 0b, 0e];
 Td4[x] = Si[x].[01];
 */
 
-static const u32 Te0[256] __attribute__((aligned (64))) = {
+static const u32 Te0[256] __attribute__((aligned (16 * 1024))) = {
     0xc66363a5U, 0xf87c7c84U, 0xee777799U, 0xf67b7b8dU,
     0xfff2f20dU, 0xd66b6bbdU, 0xde6f6fb1U, 0x91c5c554U,
     0x60303050U, 0x02010103U, 0xce6767a9U, 0x562b2b7dU,
@@ -782,11 +782,56 @@ int private_AES_set_decrypt_key(const unsigned char *userKey, const int bits,
  * in and out can overlap
  */
 #ifdef ASYNC_ATTACK
-static int first_try = 3;
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/time.h>
+#include <mqueue.h>
+#include <pthread.h>
+#include <sys/mman.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <sys/un.h>
+
+#define ASYNC_DEFAULT 0
+#define ASYNC_PRELOAD_END 1
+#define ASYNC_FLUSH_END 2
+#define ASYNC_ONE_ROUND_END 3
+#define ASYNC_RELOAD_END 4
+#define ASYNC_SMOKE_INIT 5
+
+#define ASYNC_SHM_NAME "async_shm"
+#define ASYNC_PERM_FILE (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
+
+int async_smem_fd = -1;
+unsigned int *async_smem_addr = NULL;
+unsigned int async_val = 0;
 #endif
 
 #ifdef SMOKE_BOMB_ENABLE
 #include "../../../../smoke-bomb/lib/sb_api.h"
+
+#ifdef __aarch64__
+#define get_current_pc(va) do { \
+	asm volatile("adr %0, .\n" : "=r" (va)); \
+}while(0)
+#else
+#define get_current_pc(va) do { \
+	asm volatile ("mov %0, pc\n" : "=r" (va)); \
+	va -= 8; \
+}while(0)
+#endif
+#endif
+
+#ifdef SMOKE_BOMB_PROFILING
+uint64_t sb_time_sum = 0;
+unsigned int sb_test_count = 0;
 
 #include <time.h>
 #include <stdint.h>
@@ -798,22 +843,24 @@ uint64_t get_monotonic_time(void)
 	return t1.tv_sec * 1000*1000*1000ULL + t1.tv_nsec;
 }
 
-static inline unsigned long get_current_pc(void)
+void sb_get_time(uint64_t *time, unsigned int *count)
 {
-	unsigned long pc;
-#ifdef __aarch64__
-	asm volatile("adr %0, .\n" : "=r" (pc));
+	*time = sb_time_sum;
+	*count = sb_test_count;
+}
 #else
-	asm volatile ("mov %0, pc\n" : "=r" (pc));
-	pc -= 8;
-#endif
-	return pc;
+void sb_get_time(uint64_t *time, unsigned int *count)
+{
+	*time = 0;
+	*count = 0;
 }
 #endif
 
-void AES_encrypt(const unsigned char *in, unsigned char *out,
-                 const AES_KEY *key) {
-
+#if defined(ASYNC_ATTACK) || defined(SMOKE_BOMB_PROFILING)
+void __attribute__((optimize ("-O0")))  AES_encrypt(const unsigned char *in, unsigned char *out, const AES_KEY *key) {
+#else
+void AES_encrypt(const unsigned char *in, unsigned char *out, const AES_KEY *key) {
+#endif
     const u32 *rk;
     u32 s0, s1, s2, s3, t0, t1, t2, t3;
     u32 i;
@@ -821,16 +868,71 @@ void AES_encrypt(const unsigned char *in, unsigned char *out,
     int r;
 #endif /* ?FULL_UNROLL */
 
+#ifdef ASYNC_ATTACK
+	int async_flag = 0;
+	unsigned int nopi;
+#endif
+
 #ifdef SMOKE_BOMB_ENABLE
 	int sb_ret = 0;
-	int sched_policy, sched_prio;
-	uint64_t btime, atime;
+	int sched_policy = -1, sched_prio = -1;
 	static unsigned long sva = 0, eva = 0;
 	static int sb_init_flag = 0;
+#endif
+#ifdef SMOKE_BOMB_PROFILING
+	uint64_t btime, atime;
 #endif
 
     assert(in && out && key);
     rk = key->rd_key;
+
+#ifdef ASYNC_ATTACK
+	if (async_smem_fd == -1) {
+		do {
+			if((async_smem_fd = shm_open(ASYNC_SHM_NAME, O_RDWR, ASYNC_PERM_FILE)) == -1) {
+				printf("shm_open error\n");
+				break;
+			}
+
+			async_smem_addr = mmap(NULL, 64, PROT_READ | PROT_WRITE, MAP_SHARED, async_smem_fd, 0);
+			if(async_smem_addr == MAP_FAILED) {
+				printf("mmap error\n");
+				break;
+			}
+
+			printf("async status : %d\n", *async_smem_addr);
+		}while(0);
+	}
+#endif
+
+#ifdef SMOKE_BOMB_ENABLE
+	if (sva && eva && sb_init_flag == 0) {
+
+		sb_ret = smoke_bomb_init(sva, eva, Te0, sizeof(Te0), &sched_policy, &sched_prio);
+		if (sb_ret) {
+			printf("smoke_bomb_init error : %d\n", sb_ret);
+			//exit(-1);
+		} else {
+			sb_init_flag = 1;
+			//asm volatile (".long 0x07633112");
+		}
+	}
+#endif
+
+#ifdef ASYNC_ATTACK  
+	if (async_smem_fd > 0) {
+		*(volatile unsigned int *)async_smem_addr = ASYNC_SMOKE_INIT;
+
+		while (1) {
+			if (*((volatile unsigned int *)async_smem_addr) == ASYNC_FLUSH_END)
+				break;
+		}
+	}
+#endif
+
+#ifdef SMOKE_BOMB_PROFILING
+	btime = get_monotonic_time();
+#endif
 
     /*
      * map byte array block to cipher state
@@ -914,31 +1016,41 @@ void AES_encrypt(const unsigned char *in, unsigned char *out,
 #else  /* !FULL_UNROLL */
 
 #ifdef SMOKE_BOMB_ENABLE
-	if (sva && eva && sb_init_flag == 0) {
-		sb_ret = smoke_bomb_init(sva, eva, &sched_policy, &sched_prio);
-		if (sb_ret) {
-			printf("smoke_bomb_init error : %d\n", sb_ret);
-			//exit(-1);
-		} else {
-			sb_init_flag = 1;
-		}
+	if (sva == 0) {
+		get_current_pc(sva);
 	}
-	if (sva == 0)
-		sva = get_current_pc();
-
-#ifdef SMOKE_BOMB_PROFILING
-	btime = get_monotonic_time();
-#endif
 #endif
 
 #ifdef ASYNC_ATTACK
-	/* [JB] delay */
-	for (i=0; i<(key->rounds * 5000); i++)
-		asm volatile ("nop");
+	do {
+ 		asm volatile("nop"); asm volatile("nop");
+		async_val = Te0[(s0 >> 24)       ];
+		async_val |= Te0[(s1 >> 24)       ];
+		async_val |= Te0[(s2 >> 24)       ];
+		async_val |= Te0[(s3 >> 24)       ];
+		asm volatile("nop"); asm volatile("nop");
+	}while(0);
+#ifdef SMOKE_BOMB_ENABLE
+	if (eva == 0) {
+		get_current_pc(eva);
+	}
+#endif
 
-	first_try--;
-	if (first_try == 0) {
-		printf("pre one-round encryption\n");
+	if (async_smem_fd > 0) {
+		//printf("after one-round\n");
+		*((volatile unsigned int *)async_smem_addr) = ASYNC_ONE_ROUND_END;
+
+		while (1) {
+			if (*((volatile unsigned int *)async_smem_addr) == ASYNC_RELOAD_END)
+				break;
+		}
+
+		//printf("after reload\n");
+		*((volatile unsigned int *)async_smem_addr) = ASYNC_DEFAULT;
+		
+		if (async_val == 99)
+			printf("async_val : %08x\n", async_val);
+		goto end_label;
 	}
 #endif
 
@@ -972,17 +1084,6 @@ void AES_encrypt(const unsigned char *in, unsigned char *out,
             Te3[(s2      ) & 0xff] ^
             rk[7];
 
-#ifdef ASYNC_ATTACK
-        for (i=0; i<(key->rounds * 9000); i++)
-			asm volatile ("nop");
-
-		if (first_try == 0) {
-			printf("after one-round encryption\n");
-			printf("%d,%d,%d,%d\n", (s0 >> 24), (s1 >> 24), (s2 >> 24), (s3 >> 24));
-			first_try--;
-		}
-#endif
-
         rk += 8;
         if (--r == 0) {
             break;
@@ -1014,6 +1115,7 @@ void AES_encrypt(const unsigned char *in, unsigned char *out,
             rk[3];
     }
 #endif /* ?FULL_UNROLL */
+
     /*
      * apply last round and
      * map cipher state to byte array block:
@@ -1047,18 +1149,23 @@ void AES_encrypt(const unsigned char *in, unsigned char *out,
         rk[3];
     PUTU32(out + 12, s3);
 
-#ifdef SMOKE_BOMB_ENABLE
-	if (eva == 0)
-		eva = get_current_pc();
-
 #ifdef SMOKE_BOMB_PROFILING
 	atime = get_monotonic_time();
-	printf("AES one block encryption : %lld nsec\n", atime - btime);
-	printf("AES one block encryption : %lld msec\n", (atime - btime) / 1000000ULL);
+	sb_time_sum += (atime - btime);
+	sb_test_count++;
+#endif
+
+end_label:
+#ifdef SMOKE_BOMB_ENABLE
+
+#ifndef ASYNC_ATTACK
+	if (eva == 0) {
+		get_current_pc(eva);
+	}
 #endif
 
 	if (sva && eva && sb_init_flag == 1) {
-		sb_ret = smoke_bomb_exit(sva, eva, sched_policy, sched_prio);
+		sb_ret = smoke_bomb_exit(sva, eva, Te0, sizeof(Te0), sched_policy, sched_prio);
 		if (sb_ret) {
 			printf("smoke_bomb_exit error : %d\n", sb_ret);
 			//exit(-1);
@@ -1067,6 +1174,7 @@ void AES_encrypt(const unsigned char *in, unsigned char *out,
 		}
 	}
 #endif
+	return;
 }
 
 /*

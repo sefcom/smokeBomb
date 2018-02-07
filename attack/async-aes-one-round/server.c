@@ -1,7 +1,7 @@
 /**
  *	shared memory server (POSIX)
  *
- *	Copyright (C) 2016  Jinbum Park <jinb.park7@gmail.com> Haehyun Cho <haehyun@asu.edu>
+ *	Copyright (C) 2016  Jinbum Park <jinb.park7@gmail.com>
 */
 
 #include "common.h"
@@ -270,13 +270,14 @@ int main(int argc, char **argv)
 		}
 
 		/* Pre-load sensitive data!! */
+		/*
 		first_try--;
 		if (first_try == 0)
 			printf("pre preload\n");
 		if(preload_te0() == 0)
 			break;
 		if (first_try == 0)
-			printf("after preload\n");
+			printf("after preload\n");*/
 
 		for(i=0; i<sleep_cycle; i++)
 			asm volatile ("nop");
