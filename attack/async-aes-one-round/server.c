@@ -1,7 +1,7 @@
 /**
  *	shared memory server (POSIX)
  *
- *	Copyright (C) 2016  Jinbum Park <jinb.park7@gmail.com>
+ *	Copyright (C) 2016  Jinbum Park <jinb.park7@gmail.com> Haehyun Cho <hcho67@asu.edu>
 */
 
 #include "common.h"

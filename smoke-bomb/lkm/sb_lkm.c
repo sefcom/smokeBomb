@@ -57,11 +57,18 @@ struct sensitive_data sdata_l1_arr[SB_MAX_PID][2048];
 struct sensitive_data sdata_l2_arr[SB_MAX_PID][2048];
 struct sensitive_region sdata_region[SB_MAX_PID];
 
+static void smoke_bomb_init_all_sdata_arr(void)
+{
+	memset(sdata_l1_arr, 0, sizeof(sdata_l1_arr));
+	memset(sdata_l2_arr, 0, sizeof(sdata_l2_arr));
+	memset(sdata_region, 0, sizeof(sdata_region));
+}
+
 static void smoke_bomb_init_sdata_arr(long pid)
 {
-	memset(&sdata_l1_arr[pid], 0, sizeof(sdata_l1_arr[0]));
-	memset(&sdata_l2_arr[pid], 0, sizeof(sdata_l2_arr[0]));
-	memset(&sdata_region[pid], 0, sizeof(sdata_region[0]));
+	sdata_region[pid].sva = 0;
+	sdata_region[pid].eva = 0;
+	sdata_region[pid].preload_flag = 0;
 }
 
 static int smoke_bomb_init_sdata(struct smoke_bomb_cmd_arg *arg)
@@ -80,8 +87,6 @@ static int smoke_bomb_init_sdata(struct smoke_bomb_cmd_arg *arg)
 		sb_pr_err("duplicated pid!! %ld\n", pid);
 		return -1;
 	}
-
-	smoke_bomb_init_sdata_arr(pid);
 	
 	for (va = sva; va < eva; va += CACHE_LINE_SIZE) {
 		flush_dcache((void *)va);
@@ -409,6 +414,7 @@ int __init smoke_bomb_init(void)
 	init_pmu();
 	smoke_bomb_set_cache_info();
 	smoke_bomb_init_prime_probe_arr();
+	smoke_bomb_init_all_sdata_arr();
 	return 0;
 }
 

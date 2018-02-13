@@ -150,7 +150,7 @@ void sb_preload(void)
         set2 = get_l2_set_idx_from_addr((void *)pa);
         
         for (va = sdata_region[pid].sva; va < sdata_region[pid].eva; va += CACHE_LINE_SIZE) {
-            flush_l1_dcache_set(set1, l1_ways);
+            flush_l1_dcache(set1, l1_ways - 1);
             flush_l2_dcache(set2, l2_ways - 1);
             pld_data((void *)va);
             flush_l2_dcache(set2, l2_ways - 1);

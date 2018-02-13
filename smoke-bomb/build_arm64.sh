@@ -9,7 +9,7 @@ cp -f Makefile Makefile.bkg
 cp -f Makefile.def Makefile
 sync
 
-make CROSS_COMPILE=${CC} ARCH=arm64 KDIR=/home/local/ASUAD/hcho67/works/optee_rpi3/linux
+make CROSS_COMPILE=${CC} ARCH=arm64 KDIR=/optee/linux
 
 cp -f Makefile.bkg Makefile
 rm -f Makefile.bkg

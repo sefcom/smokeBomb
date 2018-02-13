@@ -1,7 +1,7 @@
 /*
  *	sync one round attack
  *
- *	Copyright (C) 2017  Jinbum Park <jinb.park@samsung.com>
+ *	Copyright (C) 2017  Jinbum Park <jinb.park@samsung.com> Haehyun Cho <hcho67@asu.edu>
 */
 
 #include "common.h"
@@ -85,9 +85,9 @@ void __attribute__((optimize ("-O0"))) repeat_aes_encrypt(void)
 	}
 
 	while (1) {
-		bind_cpu(1);
+		//bind_cpu(1);
 		AES_ecb_encrypt(tplain, tout, &aes_key, AES_ENCRYPT);
-		bind_cpu_all();
+		//bind_cpu_all();
 		sched_yield();
 	}
 }

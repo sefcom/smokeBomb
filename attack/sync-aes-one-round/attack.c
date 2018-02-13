@@ -1,7 +1,7 @@
 /**
  *	sync one round attack
  *
- *	Copyright (C) 2017  Jinbum Park <jinb.park@samsung.com>
+ *	Copyright (C) 2017  Jinbum Park <jinb.park@samsung.com> Haehyun Cho <hcho67@asu.edu>
 */
 
 #include "common.h"
