@@ -9,7 +9,7 @@ cp -f Makefile Makefile.bkg
 cp -f Makefile.def Makefile
 sync
 
-make CROSS_COMPILE=${CC} ARCH=arm64 KDIR=/optee/linux
+make CROSS_COMPILE=${CC} ARCH=arm64 KDIR=/home/jinb.park/devel/optee/linux
 
 cp -f Makefile.bkg Makefile
 rm -f Makefile.bkg

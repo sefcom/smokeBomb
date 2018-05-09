@@ -160,6 +160,7 @@ void sb_preload(void)
         }
         
         sdata_region[pid].preload_flag = 1;
+        select_event_l1d_init();
     }
 }
 

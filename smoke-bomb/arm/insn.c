@@ -119,6 +119,7 @@ static void dispatch_ldr_reg(struct pt_regs *regs, sb_insn sb_code)
 	unsigned int idx, size;
 	unsigned int *ptr, *ptr_z;
 	unsigned int set1, set2;
+	unsigned int bc, ac;
 	unsigned long va_z;
 	phys_addr pa;
 	long pid;
@@ -141,10 +142,13 @@ static void dispatch_ldr_reg(struct pt_regs *regs, sb_insn sb_code)
 	idx = (unsigned int)regs->uregs[rm];
 	
 	ptr = (unsigned int *)((char *)ptr + (idx * size));
+
+	bc = get_pmu_count();
 	regs->uregs[rt] = *ptr; /* perform original LDR instruction */
+	ac = get_pmu_count();
 
 	/* 2. Check X */
-	if (sdata_region[pid].sva <= (unsigned long)ptr && sdata_region[pid].eva > (unsigned long)ptr) {
+	if (ac == bc) {
 		/* 3. Do nothing */
 		;
 	}
@@ -225,6 +229,7 @@ static void dispatch_ldr_imm(struct pt_regs *regs, sb_insn sb_code)
 	sb_insn rn, rt, imm12;
 	unsigned int *ptr, *ptr_z;
 	unsigned int set1, set2;
+	unsigned int bc, ac;
 	unsigned long va_z;
 	phys_addr pa;
 	long pid;
@@ -243,10 +248,13 @@ static void dispatch_ldr_imm(struct pt_regs *regs, sb_insn sb_code)
 	/* 1. Load/Store X */
 	ptr = (unsigned int *)regs->uregs[rn];
 	ptr = (unsigned int *)((char *)ptr + imm12);
+
+	bc = get_pmu_count();
 	regs->uregs[rt] = *ptr; /* perform original LDR instruction */
+	ac = get_pmu_count();
 
 	/* 2. Check X */
-	if (sdata_region[pid].sva <= (unsigned long)ptr && sdata_region[pid].eva > (unsigned long)ptr) {
+	if (ac == bc) {
 		/* 3. Do nothing */
 		;
 	}
@@ -328,6 +336,7 @@ static void dispatch_str_imm(struct pt_regs *regs, sb_insn sb_code)
 	sb_insn rn, rt, imm12;
 	unsigned int *ptr, *ptr_z;
 	unsigned int set1, set2;
+	unsigned int bc, ac;
 	unsigned long va_z;
 	phys_addr pa;
 	long pid;
@@ -347,10 +356,13 @@ static void dispatch_str_imm(struct pt_regs *regs, sb_insn sb_code)
 	ptr = (unsigned int *)regs->uregs[rn];
 	ptr = (unsigned int *)((char *)ptr + imm12);
 	//regs->uregs[rt] = *ptr; /* perform original LDR instruction */
+
+	bc = get_pmu_count();
 	*ptr = regs->uregs[rt]; /* perform original STR instruction */
+	ac = get_pmu_count();
 
 	/* 2. Check X */
-	if (sdata_region[pid].sva <= (unsigned long)ptr && sdata_region[pid].eva > (unsigned long)ptr) {
+	if (bc == ac) {
 		/* 3. Do nothing */
 		;
 	}

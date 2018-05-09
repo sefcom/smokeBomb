@@ -119,6 +119,7 @@ static void dispatch_ldr32_reg(struct pt_regs *regs, sb_insn sb_code)
 	sb_insn rm, rn, rt;
 	unsigned int *ptr, *ptr_z;
 	unsigned int idx, set1, set2;
+	unsigned int bc, ac;
 	unsigned long va_z;
 	phys_addr pa;
 	long pid;
@@ -138,10 +139,13 @@ static void dispatch_ldr32_reg(struct pt_regs *regs, sb_insn sb_code)
 	ptr = (unsigned int *)regs->regs[rn];
 	idx = (unsigned int)regs->regs[rm];
 	ptr += idx;
+
+	bc = get_pmu_count();
 	regs->regs[rt] = *ptr; /* perform original LDR instruction */
+	ac = get_pmu_count();
 
 	/* 2. Check X */
-	if (sdata_region[pid].sva <= (unsigned long)ptr && sdata_region[pid].eva > (unsigned long)ptr) {
+	if (ac == bc) {	/* cache-hit case */
 		/* 3. Do nothing */
 		;
 	}
@@ -232,6 +236,7 @@ static void dispatch_ldr32_imm(struct pt_regs *regs, sb_insn sb_code)
 	sb_insn rn, rt, imm;
 	unsigned int *ptr, *ptr_z;
 	unsigned int idx, set1, set2;
+	unsigned int bc, ac;
 	unsigned long va_z;
 	phys_addr pa;
 	long pid;
@@ -250,10 +255,13 @@ static void dispatch_ldr32_imm(struct pt_regs *regs, sb_insn sb_code)
 	/* 1. Load/Store X */
 	ptr = (unsigned int *)regs->regs[rn];
 	ptr += imm;
+
+	bc = get_pmu_count();
 	regs->regs[rt] = *ptr; /* perform original LDR instruction */
+	ac = get_pmu_count();
  
 	/* 2. Check X */
-	if (sdata_region[pid].sva <= (unsigned long)ptr && sdata_region[pid].eva > (unsigned long)ptr) {
+	if (ac == bc) {
 		/* 3. Do nothing */
 		;
 	}
@@ -324,6 +332,7 @@ static void dispatch_str32_reg(struct pt_regs *regs, sb_insn sb_code)
 	sb_insn rm, rn, rt;
 	unsigned int *ptr, *ptr_z;
 	unsigned int idx, set1, set2;
+	unsigned int bc, ac;
 	unsigned long va_z;
 	phys_addr pa;
 	long pid;
@@ -344,10 +353,13 @@ static void dispatch_str32_reg(struct pt_regs *regs, sb_insn sb_code)
 	idx = (unsigned int)regs->regs[rm];
 	ptr += idx;
 	// regs->regs[rt] = *ptr; /* perform original LDR instruction */
+
+	bc = get_pmu_count();
 	*ptr = regs->regs[rt]; /* perform original STR instruction */
+	ac = get_pmu_count();
 
 	/* 2. Check X */
-	if (sdata_region[pid].sva <= (unsigned long)ptr && sdata_region[pid].eva > (unsigned long)ptr) {
+	if (ac == bc) {
 		/* 3. Do nothing */
 		;
 	}
@@ -424,6 +436,7 @@ static void dispatch_str32_imm(struct pt_regs *regs, sb_insn sb_code)
 	sb_insn rn, rt, imm;
 	unsigned int *ptr, *ptr_z;
 	unsigned int idx, set1, set2;
+	unsigned int bc, ac;
 	unsigned long va_z;
 	phys_addr pa;
 	long pid;
@@ -443,10 +456,13 @@ static void dispatch_str32_imm(struct pt_regs *regs, sb_insn sb_code)
 	ptr = (unsigned int *)regs->regs[rn];
 	ptr += imm;
 	// regs->regs[rt] = *ptr; /* perform original LDR instruction */
+
+	bc = get_pmu_count();
 	*ptr = regs->regs[rt]; /* perform original STR instruction */
+	ac = get_pmu_count();
  
 	/* 2. Check X */
-	if (sdata_region[pid].sva <= (unsigned long)ptr && sdata_region[pid].eva > (unsigned long)ptr) {
+	if (ac == bc) {
 		/* 3. Do nothing */
 		;
 	}
