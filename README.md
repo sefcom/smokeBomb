@@ -1,14 +1,9 @@
 # smoke-bomb
 
-1. [Directories]
-2. [Build smoke-bomb for ARMv8]
-3. [Run sample-program of smoke-bomb]
+Paper: https://haehyun.github.io/papers/smokebomb-mobisys20.pdf
 
-# 1. Directories
+## 1. Directories
 
-- cache-test/ :  tests for lru policy, line fill, ...
-- during-so_aes-one-round/ :  async attack of aes one round
-- lib/ :  libflush, crypto library
 - smoke-bomb/       :  main code of smoke-bomb solution
 - smoke-bomb/lib/   :  smoke-bomb api
 - smoke-bomb/lkm/   :  smoke-bomb lkm
@@ -16,7 +11,7 @@
 - smoke-bomb/arm/   :  arm 32bit-dependent code (ARMv7, ARMv8-32bit)
 - smoke-bomb/arm64/ :  arm 64bit-depenent code
 
-# 2. Build smoke-bomb for ARMv8
+## 2. Build smoke-bomb for ARMv8
 
 * build
 ```
@@ -34,7 +29,7 @@ $ cd smoke-bomb
 $ ./clean_arm64.sh
 ```
 
-# 3. Run sample-program of smoke-bomb
+## 3. Run sample-program of smoke-bomb
 
 * on host
 ```
@@ -50,5 +45,3 @@ $ insmod [path]/smoke_bomb.ko
 $ [path]/sb_test 1 48 4
   ==> refer sb_test.c to know what argument mean
 ```
-
-

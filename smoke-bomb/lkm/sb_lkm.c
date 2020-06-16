@@ -1,30 +1,3 @@
-/*
- * You may use any sim2.0 project under the terms of either of Samsung Proprietary License or
- * the GNU General Public License (GPL) Version 2.
- *
- * GPL v2.0 : Copyright(C)   2017 Samsung Electronics Co., Ltd.
- *  http://www.samsung.com
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * Samsung Proprietary License : Copyright (c) 2015 Samsung Electronics Co., Ltd All Rights Reserved
- * PROPRIETARY/CONFIDENTIAL
- * This software is the confidential and proprietary information of
- * Samsung Electronics CO.LTD.,. ("Confidential Information").
- * You shall not disclose such Confidential Information and shall
- * use it only in accordance with the terms of the license agreement
- * you entered into with Samsung Electronics CO.LTD.,.
- *
- * SAMSUNG make no representations or warranties about the suitability of the software,
- * either express or implied, including but not limited to the implied warranties of merchantability,
- * fitness for a particular purpose, or non-infringement.
- * SAMSUNG shall not be liable for any damages suffered by licensee as a result of using,
- * modifying or distributing this software or its derivatives.
- *
-*/
-
 #include <linux/module.h>
 #include <linux/proc_fs.h>
 #include <linux/init.h>
@@ -183,11 +156,14 @@ static int smoke_bomb_cmd_init(struct smoke_bomb_cmd_arg *arg)
 	}
 
 	/* 2. patch for LDRFLUSH */
+	/*
 	r = patch_user_memory(arg->sva, arg->eva);
 	if (r) {
 		sb_pr_err("patch_user_memory error : %d\n", r);
 		return r;
 	}
+	*/
+	// Already patched by rewriter
 
 	sb_pr_info("smoke_bomb_cmd_init end\n");
 	return 0;
