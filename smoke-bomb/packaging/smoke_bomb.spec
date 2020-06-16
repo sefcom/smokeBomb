@@ -3,7 +3,7 @@ Version: 0
 Release: 0
 License: To be filled
 Summary: smoke-bomb
-Packager: Jinbum Park <jinb.park@samsung.com>
+Packager: Packager: Author <E-mail>
 Group: Application
 Source: %{name}-%{version}.tar.gz
 BuildRequires: cmake
