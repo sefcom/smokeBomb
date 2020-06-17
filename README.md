@@ -6,7 +6,7 @@ We presented this approach and our findings in the following research paper.
 
 **SmokeBomb: Effective Mitigation Against Cache Side-channel Attacks on the ARM Architecture**<br />
 Haehyun Cho, Jinbum Park, Donguk Kim, Ziming Zhao, Yan Shoshitaishvili, Adam Doupé, Gail-Joon Ahn.<br />
-In Proceedings of the 18th ACM International Conference on Mobile Systems, Applications, and Services (MobiSys), Jun 2020.
+In Proceedings of the 18th ACM International Conference on Mobile Systems, Applications, and Services (MobiSys).
 
 Paper: [[PDF]](https://haehyun.github.io/papers/smokebomb-mobisys20.pdf)
 
