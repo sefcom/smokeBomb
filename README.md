@@ -4,10 +4,8 @@ Smokebomb is an automated mitigation approach for preventing cache side-channel 
 The core idea is that a process can request exclusive access to the L1 cache on a CPU.
 We presented this approach and our findings in the following research paper.
 
-**SmokeBomb: Effective Mitigation Against Cache Side-channel Attacks on the ARM Architecture**
-
-Haehyun Cho, Jinbum Park, Donguk Kim, Ziming Zhao, Yan Shoshitaishvili, Adam Doupé, Gail-Joon Ahn.
-
+**SmokeBomb: Effective Mitigation Against Cache Side-channel Attacks on the ARM Architecture**<br />
+Haehyun Cho, Jinbum Park, Donguk Kim, Ziming Zhao, Yan Shoshitaishvili, Adam Doupé, Gail-Joon Ahn.<br />
 In Proceedings of the 18th ACM International Conference on Mobile Systems, Applications, and Services (MobiSys), Jun 2020.
 
 Paper: [[PDF]](https://haehyun.github.io/papers/smokebomb-mobisys20.pdf)
